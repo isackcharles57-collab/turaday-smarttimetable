@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tura Day — Smart Timetable</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root{
+  --blue:#1952a6; --accent:#1a73e8; --muted:#6b7280; --bg:#eef5ff; --card:#ffffff;
+}
+*{box-sizing:border-box}
+body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial; margin:0; background:var(--bg); color:#0b2336}
+header{padding:18px 20px; display:flex; justify-content:space-between; align-items:center; background:var(--blue); color:white}
+header h1{font-size:20px;margin:0}
+.wrap{max-width:1150px;margin:0 auto;padding:18px}
+.layout{display:grid; grid-template-columns:320px 1fr; gap:16px}
+@media(max-width:980px){.layout{grid-template-columns:1fr}}
+.panel{background:var(--card); padding:14px; border-radius:10px; box-shadow:0 6px 20px rgba(15,35,80,0.06)}
+label{display:block; font-size:13px; color:var(--muted); margin-top:8px}
+input[type=text], input[type=number], textarea{width:100%; padding:10px; margin-top:6px; border-radius:8px; border:1px solid #dbe7ff;}
+textarea{min-height:80px; resize:vertical}
+.row{display:flex; gap:8px}
+.btn{background:var(--accent); color:white; border:none; padding:10px 12px; border-radius:8px; cursor:pointer}
+.ghost{background:transparent; border:1px solid #d9eaff; color:var(--blue)}
+.small{font-size:13px; color:var(--muted)}
+.subjects .subject{background:linear-gradient(90deg,var(--blue),#1a9df0); color:white; padding:8px 10px; border-radius:8px; margin-bottom:8px; cursor:grab; user-select:none}
+.subjects .subject:active{cursor:grabbing}
+.tabs{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px}
+.tabs button{padding:8px 10px; border-radius:8px; border:1px solid transparent; background:#f5f9ff; cursor:pointer}
+.tabs button.active{background:var(--blue); color:white; border-color:transparent}
+.timetable-wrap{overflow:auto}
+table.timetable{width:100%; border-collapse:collapse; min-width:740px}
+table.timetable th{background:var(--blue); color:#fff; padding:10px; position:sticky; top:0; z-index:2}
+table.timetable td{border:1px solid #e6eefc; padding:10px; height:68px; vertical-align:middle; text-align:center}
+td.dropzone{background:#fbfdff}
+td.empty{color:var(--muted)}
+tr.break{background:#fff5cc; font-weight:700}
+tr.lunch{background:#ffe2e2; font-weight:700}
+td.non-drop{background:#f3f5f8; color:var(--muted)}
+.controls{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px}
+footer{margin-top:20px; text-align:center; font-size:12px; color:var(--muted)}
+@media(max-width:720px){
+  table.timetable{min-width:unset}
+  table.timetable thead{display:none}
+  table.timetable tr{display:block; margin-bottom:8px; border-radius:8px; overflow:hidden; box-shadow:0 2px 10px rgba(8,12,30,0.04)}
+  table.timetable td{display:block; text-align:left; padding:10px}
+  table.timetable td:first-child{background:#f6fbff; font-weight:700}
+  td[data-label]:before{content:attr(data-label); display:block; font-weight:700; color:var(--muted); margin-bottom:6px}
+}
+@media print{
+  body{background:white; margin:0; padding:0; font-size:10px}
+  header, .panel button, .controls, .subjects, .panel .small, .ghost, hr{display:none}
+  .timetable{page-break-inside:avoid !important; width:100%; table-layout:fixed; font-size:10px}
+  table, th, td{border:1px solid #aaa; border-collapse:collapse; word-wrap:break-word}
+  tr, td, th{page-break-inside:avoid; page-break-after:avoid}
+  @page{size:landscape; margin:5mm;}
+  td, th{padding:4px}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Tura Day — Smart Timetable</h1>
+  <div class="small" id="nowDate"></div>
+</header>
+
+<div class="wrap">
+<div class="layout">
+
+<div class="panel">
+<label>Walimu na Somo (Jina - Somo)</label>
+<textarea id="teachersInput" placeholder="Isack - Biology&#10;John - Math&#10;Anna - English"></textarea>
+
+<label>Madarasa (comma-separated)</label>
+<input id="classesInput" placeholder="Form 1A, Form 1B, Form 1C, Form 1D" type="text"/>
+
+<label>Vipindi (line-separated HH:MM-HH:MM)</label>
+<textarea id="periodsInput" placeholder="08:00-09:00&#10;09:10-10:10&#10;10:20-10:40&#10;11:00-12:00&#10;12:10-13:00&#10;14:00-15:00"></textarea>
+
+<label>Max periods per teacher per day</label>
+<input id="maxPerDay" type="number" min="1" />
+
+<div class="row" style="margin-top:8px">
+<button class="btn" onclick="smartGenerate()">Auto-generate (Smart)</button>
+<button class="btn ghost" onclick="saveLocal()">Save</button>
+<button class="btn ghost" onclick="loadLocal()">Load</button>
+</div>
+
+<hr style="margin:12px 0;border:none;border-top:1px solid #eef4ff"/>
+<strong>Subjects (Drag to timetable)</strong>
+<div class="subjects" id="subjectPanel" style="margin-top:8px; max-height:240px; overflow:auto"></div>
+
+<hr style="margin:12px 0;border:none;border-top:1px solid #eef4ff"/>
+<div class="row" style="gap:8px; flex-wrap:wrap">
+<button class="btn" onclick="exportExcel()">Export Excel</button>
+<button class="btn ghost" onclick="printPDF()">Print / PDF</button>
+<button class="btn ghost" onclick="exportJSON()">Export JSON</button>
+<button class="btn ghost" onclick="importJSON()">Import JSON</button>
+</div>
+
+<div id="status" class="small" style="margin-top:8px;color:green"></div>
+</div>
+
+<div class="panel">
+<div class="tabs" id="tabsContainer"></div>
+<div class="timetable-wrap">
+<div id="timetableHolder"></div>
+</div>
+</div>
+
+</div>
+</div>
+
+<footer>Developer: Isack Charles</footer>
+
+<script>
+const now = new Date(); document.getElementById('nowDate').textContent = now.toLocaleDateString();
+let state={teachers:[],classes:[],periods:[],weekdays:["Monday","Tuesday","Wednesday","Thursday","Friday"],timetable:{},maxPerDay:null};
+const defaultPeriods=["08:00-09:00","09:10-10:10","10:20-10:40","11:00-12:00","12:10-13:00","14:00-15:00"];
+
+function parseTeachers(text){return text.split("\n").map(s=>s.trim()).filter(Boolean).map(line=>{const parts=line.split("-"); if(parts.length<2) return null; return {id:Math.random().toString(36).slice(2), name:parts[0].trim(), subject:parts.slice(1).join("-").trim()};}).filter(Boolean);}
+function parsePeriods(text){return text.split("\n").map(s=>s.trim()).filter(Boolean).map(l=>{const [a,b]=l.split("-"); return {start:a.trim(),end:b?b.trim():"",label:l};});}
+function regenSubjects(){const panel=document.getElementById("subjectPanel"); panel.innerHTML=""; state.teachers.forEach(t=>{const div=document.createElement("div"); div.className="subject"; div.draggable=true; div.innerText=`${t.subject} — ${t.name}`; div.dataset.teacherId=t.id; div.addEventListener('dragstart', e=>{e.dataTransfer.setData('text/plain',JSON.stringify({subject:t.subject,teacherName:t.name,teacherId:t.id}));}); panel.appendChild(div);});}
+function buildTabs(){const tabs=document.getElementById("tabsContainer"); tabs.innerHTML=""; state.classes.forEach((c, idx) => {const btn=document.createElement("button"); btn.textContent=c; btn.onclick = () => selectClass(idx); btn.id=`tab-${idx}`; tabs.appendChild(btn);}); if(state.classes.length>0) selectClass(0);}
+let currentClassIndex=0;
+function selectClass(idx){currentClassIndex=idx; [...document.querySelectorAll('#tabsContainer button')].forEach(b=>b.classList.remove('active')); const b=document.getElementById(`tab-${idx}`); if(b) b.classList.add('active'); renderTimetableForClass(state.classes[idx]);}
+function renderTimetableForClass(className){if(!state.timetable[className]){state.timetable[className]=[]; for(let d=0;d<state.weekdays.length;d++){state.timetable[className][d]=new Array(state.periods.length).fill(null);}} const holder=document.getElementById("timetableHolder"); const days=state.weekdays; let html=`<table class="timetable"><thead><tr><th>Time</th>`; days.forEach(d=> html+=`<th>${d}</th>`); html+=`</tr></thead><tbody>`; for(let p=0;p<state.periods.length;p++){const per=state.periods[p]; const label=`${per.start}-${per.end}`; const isBreak=label.includes("10:20")||per.start==="10:20"||per.end==="10:40"; const isLunch=label.includes("12:10")||per.start==="12:10"||per.end==="13:00"||per.start==="13:00"; if(isBreak){html+=`<tr class="break"><td colspan="${1+days.length}">BREAK — ${per.start}</td></tr>`; continue;} if(isLunch){html+=`<tr class="lunch"><td colspan="${1+days.length}">LUNCH — ${per.start}</td></tr>`; continue;} html+=`<tr><td>${per.start} - ${per.end}</td>`; for(let d=0;d<days.length;d++){const cell=state.timetable[className][d][p]; const content=cell?`<div>${cell.subject}<br><small>${cell.teacherName||''}</small></div>`:`<span class="empty">—</span>`; html+=`<td class="dropzone" data-day="${d}" data-period="${p}" data-label="${days[d]}">${content}</td>`;} html+=`</tr>`;} html+=`</tbody></table>`; holder.innerHTML=html; holder.querySelectorAll('.dropzone').forEach(td=>{td.addEventListener('dragover',e=>e.preventDefault()); td.addEventListener('drop',handleDropOnCell); td.addEventListener('dblclick',handleClearCell);});}
+
+function handleDropOnCell(e){e.preventDefault(); try{const data=JSON.parse(e.dataTransfer.getData('text/plain')); const day=+e.target.dataset.day; const period=+e.target.dataset.period; const className=state.classes[currentClassIndex]; if(checkConflict(className,day,period,data.teacherId)){if(!confirm('Mgongano detected! Continue?')) return;} state.timetable[className][day][period]={subject:data.subject,teacherName:data.teacherName,teacherId:data.teacherId}; renderTimetableForClass(className);}catch(err){console.error(err);}}
+function handleClearCell(e){const day=+e.target.dataset.day; const period=+e.target.dataset.period; const className=state.classes[currentClassIndex]; if(!confirm('Futa cell?')) return; state.timetable[className][day][period]=null; renderTimetableForClass(className);}
+function checkConflict(targetClass, day, period, teacherId){if(!teacherId) return false; for(const cls of state.classes){if(cls===targetClass) continue; const cell=state.timetable[cls]&&state.timetable[cls][day]&&state.timetable[cls][day][period]; if(cell&&cell.teacherId===teacherId) return true;} return false;}
+function teacherAssignedCountOnDay(teacherId, day){let cnt=0; for(const cls of state.classes){const arr=state.timetable[cls]&&state.timetable[cls][day]; if(!arr) continue; arr.forEach(cell=>{if(cell&&cell.teacherId===teacherId) cnt++;});} return cnt;}
+
+function smartGenerate(){
+  state.teachers=parseTeachers(document.getElementById('teachersInput').value);
+  state.classes=document.getElementById('classesInput').value.split(",").map(s=>s.trim()).filter(Boolean);
+  state.periods=parsePeriods(document.getElementById('periodsInput').value||defaultPeriods.join("\n"));
+  state.maxPerDay=parseInt(document.getElementById('maxPerDay').value)||null;
+  state.timetable={};
+  state.classes.forEach(cls=>{state.timetable[cls]=[]; for(let d=0;d<state.weekdays.length;d++){state.timetable[cls][d]=new Array(state.periods.length).fill(null);}});
+  function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]} return a}
+  for(let d=0;d<state.weekdays.length;d++){
+    for(let p=0;p<state.periods.length;p++){
+      const per=state.periods[p]; const label=`${per.start}-${per.end}`;
+      const isBreak=label.includes("10:20")||per.start==="10:20"||per.end==="10:40";
+      const isLunch=label.includes("12:10")||per.start==="12:10"||per.end==="13:00"||per.start==="13:00";
+      if(isBreak||isLunch) continue;
+      const pool=shuffle(state.teachers.slice());
+      for(const cls of state.classes){
+        if(state.timetable[cls][d][p]) continue;
+        let assigned=null; pool.sort((a,b)=>teacherAssignedCountOnDay(a.id,d)-teacherAssignedCountOnDay(b.id,d));
+        for(const t of pool){if(checkConflict(cls,d,p,t.id)) continue; if(state.maxPerDay&&teacherAssignedCountOnDay(t.id,d)>=state.maxPerDay) continue; assigned={subject:t.subject,teacherName:t.name,teacherId:t.id}; break;}
+        if(assigned) state.timetable[cls][d][p]=assigned; else state.timetable[cls][d][p]=null;
+      }
+    }
+  }
+  regenSubjects(); buildTabs(); setStatus('Ratiba smart imetengenezwa');
+}
+
+function setStatus(msg,t=3000){const s=document.getElementById('status'); s.textContent=msg; if(t)setTimeout(()=>s.textContent='',t);}
+function saveLocal(){localStorage.setItem('smartTimetableData',JSON.stringify(state)); setStatus('Saved to LocalStorage');}
+function loadLocal(){const raw=localStorage.getItem('smartTimetableData'); if(!raw){alert('No saved data'); return;} try{state=JSON.parse(raw); regenSubjects(); buildTabs(); setStatus('Loaded from LocalStorage');}catch(e){alert('Failed to load: '+e)}}
+function exportExcel(){const wb=XLSX.utils.book_new(); state.classes.forEach(cls=>{const data=[]; const header=['Time',...state.weekdays]; data.push(header); for(let p=0;p<state.periods.length;p++){const per=state.periods[p]; const label=`${per.start}-${per.end}`; const isBreak=label.includes("10:20")||per.start==="10:20"||per.end==="10:40"; const isLunch=label.includes("12:10")||per.start==="12:10"||per.end==="13:00"||per.start==="13:00"; if(isBreak){data.push([`BREAK — ${per.start}`]); continue;} if(isLunch){data.push([`LUNCH — ${per.start}`]); continue;} const row=[`${per.start} - ${per.end}`]; for(let d=0;d<state.weekdays.length;d++){const cell=(state.timetable[cls]&&state.timetable[cls][d]&&state.timetable[cls][d][p])||null; row.push(cell?`${cell.subject} — ${cell.teacherName}`:'');} data.push(row);} const ws=XLSX.utils.aoa_to_sheet(data); XLSX.utils.book_append_sheet(wb,ws,cls.substring(0,31));}); XLSX.writeFile(wb,'Timetable.xlsx');}
+function printPDF(){window.print();}
+function exportJSON(){const data=JSON.stringify(state); const blob=new Blob([data],{type:"application/json"}); const
